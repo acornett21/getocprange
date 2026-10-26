@@ -24,8 +24,10 @@ type versionMapping struct {
 	OcpVersion  string `yaml:"ocp-version"`
 }
 
-// Maps a Kubernetes version to its corresponding OCP version.
-var kubeOpenShiftVersionMap map[string]string
+// Maps a Kubernetes version to its corresponding OCP version(s). A Kubernetes
+// version can map to more than one OCP version, e.g. Kubernetes 1.36 maps to
+// both OCP 4.23 and OCP 5.0.
+var kubeOpenShiftVersionMap map[string][]string
 
 // Contains the highest known Kubernetes version. Used to determine if the provided Kubernetes
 // range is open-ended.
@@ -34,7 +36,7 @@ var upperKubeVersion *semver.Version
 // Upon initialization of this package, the kubeOpenShiftVersionMap variable is populated with the
 // content of kubeOpenShiftVersionMap.yaml.
 func init() {
-	kubeOpenShiftVersionMap = make(map[string]string)
+	kubeOpenShiftVersionMap = make(map[string][]string)
 
 	yamlFile, err := content.ReadFile("kubeOpenShiftVersionMap.yaml")
 	if err != nil {
@@ -59,7 +61,8 @@ func init() {
 		}
 
 		// Build Kubernetes version to OCP version mapping.
-		kubeOpenShiftVersionMap[versionMap.KubeVersion] = versionMap.OcpVersion
+		kubeOpenShiftVersionMap[versionMap.KubeVersion] = append(
+			kubeOpenShiftVersionMap[versionMap.KubeVersion], versionMap.OcpVersion)
 	}
 }
 
@@ -87,7 +90,7 @@ func GetOCPRange(kubeVersionRange string) (string, error) {
 		return "", fmt.Errorf("error converting %s to Constraint: %v", kubeVersionRange, err)
 	}
 
-	for kubeVersionString, OCPVersionString := range kubeOpenShiftVersionMap {
+	for kubeVersionString, OCPVersionStrings := range kubeOpenShiftVersionMap {
 		// Check which of the known Kubernetes versions validate the Constraint.
 		kubeVersionObj, err := semver.NewVersion(kubeVersionString)
 		if err != nil {
@@ -96,15 +99,17 @@ func GetOCPRange(kubeVersionRange string) (string, error) {
 		isInRange, _ := kubeVersionRangeConstraint.Validate(kubeVersionObj)
 		if isInRange {
 			// Register the corresponding minimum and maximum OCP versions.
-			OCPVersionObj, err := semver.NewVersion(OCPVersionString)
-			if err != nil {
-				return "", fmt.Errorf("error converting %s to Version: %v", OCPVersionString, err)
-			}
-			if OCPVersionObj.LessThan(minOCPRange) {
-				minOCPRange = OCPVersionObj
-			}
-			if OCPVersionObj.GreaterThan(maxOCPRange) {
-				maxOCPRange = OCPVersionObj
+			for _, OCPVersionString := range OCPVersionStrings {
+				OCPVersionObj, err := semver.NewVersion(OCPVersionString)
+				if err != nil {
+					return "", fmt.Errorf("error converting %s to Version: %v", OCPVersionString, err)
+				}
+				if OCPVersionObj.LessThan(minOCPRange) {
+					minOCPRange = OCPVersionObj
+				}
+				if OCPVersionObj.GreaterThan(maxOCPRange) {
+					maxOCPRange = OCPVersionObj
+				}
 			}
 		}
 	}
